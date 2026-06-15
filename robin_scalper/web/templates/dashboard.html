@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Robin 震荡 · 面板</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">●</span>
+    <span class="title">Robin 震荡</span>
+    <span class="muted" id="sym"></span>
+  </div>
+  <div class="status">
+    <span id="conn" class="dot"></span><span id="connText">连接中...</span>
+    <span class="sep">|</span>
+    <span id="mode" class="badge paper">模拟盘</span>
+    <span class="sep">|</span>
+    <span id="runStat" class="badge off">未运行</span>
+  </div>
+  <div class="ctrl">
+    <button id="btnStart" class="primary">启动</button>
+    <button id="btnStop">停止</button>
+    <button id="btnCloseAll" class="warn">全部平仓</button>
+    <a href="/logout">退出</a>
+  </div>
+</header>
+
+<main class="grid">
+  <!-- 左：行情 + 指标 + HTF -->
+  <section class="card">
+    <h2>实时行情</h2>
+    <div class="kv">
+      <div><span class="lbl">最新价</span><b id="last" class="big">--</b></div>
+      <div><span class="lbl">买一</span><b id="bid">--</b></div>
+      <div><span class="lbl">卖一</span><b id="ask">--</b></div>
+    </div>
+    <div class="kv small">
+      <div><span class="lbl">RSI(14)</span><b id="rsi">--</b></div>
+      <div><span class="lbl">最近评估</span><b id="evalText" class="muted">--</b></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>大周期趋势</h2>
+    <div class="htf">
+      <div class="htf-row">
+        <div><span class="lbl">周期</span><b id="htfTF">--</b></div>
+        <div><span class="lbl">趋势</span><b id="htfTrend" class="trend">--</b></div>
+        <div><span class="lbl">价格</span><b id="htfPrice">--</b></div>
+      </div>
+      <div class="htf-row">
+        <div><span class="lbl">MA1</span><b id="htfMA1">--</b></div>
+        <div><span class="lbl">MA2</span><b id="htfMA2">--</b></div>
+        <div><span class="lbl">ADX</span><b id="htfADX">--</b></div>
+        <div><span class="lbl">MACD/Sig</span><b id="htfMACD">--</b></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>持仓 & 浮盈</h2>
+    <div class="kv">
+      <div><span class="lbl">多仓</span><b id="longL">--</b></div>
+      <div><span class="lbl">空仓</span><b id="shortL">--</b></div>
+      <div><span class="lbl">未实现盈亏</span><b id="upnl" class="big">--</b></div>
+    </div>
+    <div class="risk-tags">
+      <span id="tagNoTrade" class="tag">不在不做单时段</span>
+      <span id="tagDaily" class="tag">未达每日上限</span>
+      <span id="tagWait" class="tag">未在平仓后等待</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>网格状态</h2>
+    <div class="grid-side">
+      <div>
+        <h3>多头</h3>
+        <div class="kv">
+          <div><span class="lbl">激活</span><b id="buyActive">--</b></div>
+          <div><span class="lbl">成本</span><b id="buyAvg">--</b></div>
+          <div><span class="lbl">移动止盈</span><b id="buyTrail">--</b></div>
+        </div>
+        <table id="buyTable" class="gtable"><thead><tr><th>#</th><th>价格</th><th>手数</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div>
+        <h3>空头</h3>
+        <div class="kv">
+          <div><span class="lbl">激活</span><b id="sellActive">--</b></div>
+          <div><span class="lbl">成本</span><b id="sellAvg">--</b></div>
+          <div><span class="lbl">移动止盈</span><b id="sellTrail">--</b></div>
+        </div>
+        <table id="sellTable" class="gtable"><thead><tr><th>#</th><th>价格</th><th>手数</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 右：参数配置 + 模式 + 日志 -->
+  <section class="card wide">
+    <h2>运行控制</h2>
+    <div class="row">
+      <label>交易模式
+        <select id="tradingMode">
+          <option value="paper">模拟盘（推荐）</option>
+          <option value="live">真实交易</option>
+        </select>
+      </label>
+      <label>是否测试网
+        <select id="testnet">
+          <option value="true">是（Testnet）</option>
+          <option value="false">否（主网，请务必谨慎）</option>
+        </select>
+      </label>
+      <label>API Key<input id="apiKey" type="text" placeholder="切到真实盘时填写"></label>
+      <label>API Secret<input id="apiSec" type="password" placeholder="切到真实盘时填写"></label>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>参数配置 <button id="btnSaveCfg" class="primary small">保存</button> <span id="cfgTip" class="muted"></span></h2>
+    <div class="cfg-grid">
+      <fieldset>
+        <legend>交易对 / 杠杆</legend>
+        <label>交易对<input data-cfg="symbol" /></label>
+        <label>杠杆<input data-cfg="leverage" type="number" min="1" max="125" /></label>
+        <label>保证金模式
+          <select data-cfg="margin_mode"><option>ISOLATED</option><option>CROSSED</option></select>
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>交易方向</legend>
+        <label class="chk"><input data-cfg="trade_buy" type="checkbox"> 做多</label>
+        <label class="chk"><input data-cfg="trade_sell" type="checkbox"> 做空</label>
+      </fieldset>
+      <fieldset>
+        <legend>大周期 HTF</legend>
+        <label class="chk"><input data-cfg="enable_check_htf" type="checkbox"> 启用 HTF 过滤</label>
+        <label>HTF 周期
+          <select data-cfg="htf_timeframe">
+            <option>1m</option><option>3m</option><option>5m</option><option>15m</option>
+            <option>30m</option><option>1h</option><option>2h</option><option>4h</option>
+            <option>6h</option><option>8h</option><option>12h</option><option>1d</option>
+          </select>
+        </label>
+        <label>判断方法
+          <select data-cfg="trend_method">
+            <option value="price_vs_ma">价格 vs MA</option>
+            <option value="ma_crossover">双 MA 交叉</option>
+            <option value="ma_adx">MA + ADX</option>
+            <option value="macd">MACD</option>
+          </select>
+        </label>
+        <label>灵敏度 (1~10)<input data-cfg="htf_sensitivity" type="number" step="0.1" min="1" max="10" /></label>
+        <label>MA2<input data-cfg="htf_ma_period2" type="number" /></label>
+        <label>ADX 周期<input data-cfg="htf_adx_period" type="number" /></label>
+        <label>ADX 阈值<input data-cfg="htf_adx_threshold" type="number" step="0.1" /></label>
+        <label>MACD 快/慢/信号
+          <span class="tri"><input data-cfg="htf_macd_fast" type="number"><input data-cfg="htf_macd_slow" type="number"><input data-cfg="htf_macd_signal" type="number"></span>
+        </label>
+        <label class="chk"><input data-cfg="htf_use_closed_bar" type="checkbox"> 使用已收线</label>
+      </fieldset>
+      <fieldset>
+        <legend>RSI 入场</legend>
+        <label class="chk"><input data-cfg="enable_check_rsi" type="checkbox"> 启用 RSI</label>
+        <label>RSI 周期<input data-cfg="rsi_period" type="number" /></label>
+        <label>开仓因子 (1~10)<input data-cfg="open_factor" type="number" step="0.1" min="1" max="10" /></label>
+        <div class="muted" id="rsiLevels">RSI 上沿/下沿：-- / --</div>
+      </fieldset>
+      <fieldset>
+        <legend>网格</legend>
+        <label>网格数量<input data-cfg="grid_count" type="number" min="1" max="50" /></label>
+        <label>网格间距 %<input data-cfg="grid_spacing_pct" type="number" step="0.01" /></label>
+        <label>每格手数<input data-cfg="grid_lot_size" type="number" step="0.001" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>止盈 / 止损</legend>
+        <label>止盈 %<input data-cfg="tp_percent" type="number" step="0.05" /></label>
+        <label>止损 %<input data-cfg="sl_percent" type="number" step="0.05" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>最大亏损</legend>
+        <label class="chk"><input data-cfg="use_max_loss" type="checkbox"> 启用</label>
+        <label>最大浮亏 USDT<input data-cfg="max_loss_usdt" type="number" step="0.1" /></label>
+        <label class="chk"><input data-cfg="wait_after_max_loss" type="checkbox"> 亏损后停止</label>
+        <label>等待分钟<input data-cfg="max_loss_wait_minutes" type="number" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>分批止盈</legend>
+        <label class="chk"><input data-cfg="use_split_tp" type="checkbox"> 启用</label>
+        <label>L1 触发 %<input data-cfg="tp_level1_pct" type="number" step="0.05" /></label>
+        <label>L1 平仓比例<input data-cfg="tp_level1_ratio" type="number" step="0.05" min="0" max="1" /></label>
+        <label>L2 触发 %<input data-cfg="tp_level2_pct" type="number" step="0.05" /></label>
+        <label>L2 平仓比例<input data-cfg="tp_level2_ratio" type="number" step="0.05" min="0" max="1" /></label>
+        <label>L3 触发 %<input data-cfg="tp_level3_pct" type="number" step="0.05" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>保本损</legend>
+        <label class="chk"><input data-cfg="use_breakeven" type="checkbox"> 启用</label>
+        <label>触发阈值 %<input data-cfg="breakeven_trigger" type="number" step="0.05" /></label>
+        <label>偏移 %<input data-cfg="breakeven_offset" type="number" step="0.05" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>每日限制 / 等待</legend>
+        <label class="chk"><input data-cfg="enable_daily_open_limit" type="checkbox"> 启用每日开仓上限</label>
+        <label>每日最大开仓<input data-cfg="daily_max_opens" type="number" /></label>
+        <label class="chk"><input data-cfg="enable_wait_after_close" type="checkbox"> 平仓后等待</label>
+        <label>等待分钟<input data-cfg="wait_minutes_after_close" type="number" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>不做单时间段</legend>
+        <label class="chk"><input data-cfg="enable_trading_hours" type="checkbox"> 启用</label>
+        <label>时间段<input data-cfg="no_trade_times" placeholder="00:00-02:00,05:00-08:00" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>移动止盈（价格百分比）</legend>
+        <label class="chk"><input data-cfg="use_trailing_stop" type="checkbox"> 启用</label>
+        <label>激活 %<input data-cfg="trailing_start_pct" type="number" step="0.05" /></label>
+        <label>回撤 %<input data-cfg="trailing_back_pct" type="number" step="0.05" /></label>
+      </fieldset>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>实时日志</h2>
+    <div class="logbox" id="log"></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

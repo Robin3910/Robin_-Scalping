@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Robin 震荡 · 登录</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+<div class="login-card">
+  <h1>Robin 震荡 · Scalper</h1>
+  <p class="muted">Binance USDT 永续合约 / Python 移植版</p>
+  <form id="form">
+    <input type="password" name="password" id="pwd" placeholder="请输入面板密码" autofocus>
+    <button type="submit">登 录</button>
+    <div id="err" class="err"></div>
+  </form>
+  <p class="hint">首次启动密码在 <code>.env</code> 的 <code>ROBIN_PASSWORD</code> 配置</p>
+</div>
+<script>
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pwd = document.getElementById('pwd').value;
+  const r = await fetch('/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pwd})});
+  const j = await r.json();
+  if (j.ok) { location.href = '/dashboard'; }
+  else { document.getElementById('err').textContent = j.error || '登录失败'; }
+});
+</script>
+</body>
+</html>
