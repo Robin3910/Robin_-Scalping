@@ -134,20 +134,28 @@ class BinanceFeed:
 
     async def _consume_aggtrade(self, url: str) -> None:
         import websockets
-        async with websockets.connect(url, ping_interval=20) as ws:
+        import ssl as ssl_lib
+        import certifi
+        ssl_ctx = ssl_lib.create_default_context()
+        ssl_ctx.load_verify_locations(certifi.where())
+        async with websockets.connect(url, ping_interval=20, ssl=ssl_ctx) as ws:
             async for msg in ws:
                 if self._stop.is_set():
                     break
                 d = json.loads(msg)
                 price = float(d["p"]); qty = float(d["q"]); ts = int(d["T"])
                 self.agg.on_trade(price, qty, ts)
-                # 推送价格 tick
-                await self.bus.publish("tick", {"price": price, "ts": ts / 1000.0})
+                # 推送价格 tick，顺便带上 Binance 时间戳用于计算延迟
+                await self.bus.publish("tick", {"price": price, "ts": time.time(), "binance_ts": ts / 1000.0})
                 await self.bus.publish("trade", {"price": price, "qty": qty, "ts": ts / 1000.0})
 
     async def _consume_book(self, url: str) -> None:
         import websockets
-        async with websockets.connect(url, ping_interval=20) as ws:
+        import ssl as ssl_lib
+        import certifi
+        ssl_ctx = ssl_lib.create_default_context()
+        ssl_ctx.load_verify_locations(certifi.where())
+        async with websockets.connect(url, ping_interval=20, ssl=ssl_ctx) as ws:
             async for msg in ws:
                 if self._stop.is_set():
                     break
@@ -164,7 +172,7 @@ class BinanceFeed:
             price = float(d["p"]); qty = float(d["q"]); ts = int(d["T"])
             self.agg.on_trade(price, qty, ts)
             # 同步模式下，bus 的协程推送放到 fire-and-forget 线程里
-            self.bus.publish_sync("tick", {"price": price, "ts": ts / 1000.0})
+            self.bus.publish_sync("tick", {"price": price, "ts": time.time(), "binance_ts": ts / 1000.0})
             self.bus.publish_sync("trade", {"price": price, "qty": qty, "ts": ts / 1000.0})
         ws.close()
 

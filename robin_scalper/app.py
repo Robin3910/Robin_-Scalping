@@ -100,6 +100,14 @@ class App:
         self.state.running = True
         self.log.info(f"启动策略：symbol={self.cfg.symbol} paper={self.cfg.paper_trading} testnet={self.cfg.testnet}")
 
+        # 启动前先加载历史 K 线
+        self.agg.load_history(
+            symbol=self.cfg.symbol,
+            testnet=self.cfg.testnet,
+            limit=200,
+            log_fn=self.log.info,
+        )
+
         # 真实盘：设置杠杆
         if not self.cfg.paper_trading:
             try:
@@ -114,6 +122,10 @@ class App:
         async def on_tick(env):
             d = env["data"]
             ts = d.get("ts", time.time())
+            # 计算延迟：消息时间戳 vs 本地收到时间
+            binance_ts = d.get("binance_ts", 0)
+            if binance_ts > 0:
+                self.state.ws_latency_ms = (ts - binance_ts) * 1000
             self._tick_ts = ts
             price = float(d["price"])
             bid = self.state.bid or price

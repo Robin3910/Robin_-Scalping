@@ -74,16 +74,34 @@ class StrategyEngine:
         self.bus = bus
         self._executor = None  # 由外部注入（asyncio loop 所在线程的 executor）
 
+        # 节流：上次执行 tick 的时间
+        self._last_tick_run: float = 0.0
+        self._tick_interval: float = 0.030   # 30ms
+        # 定期状态日志
+        self._last_status_log: float = 0.0
+        self._status_log_interval: float = 10.0  # 10s
+        # 评估日志节流：记录上次打印详细评估的时间
+        self._last_eval_log: float = 0.0
+        self._eval_log_interval: float = 5.0  # 评估详细日志 5s 一次
+        self._last_eval_result: dict = {}  # 记忆上次结果，用于检测变化
+
     def bind_executor(self, executor):
         self._executor = executor
 
     # -------- 入口 --------
     async def on_tick(self, price: float, bid: float, ask: float) -> None:
+        now = time.time()
+
+        # 节流：30ms 才执行一次
+        if now - self._last_tick_run < self._tick_interval:
+            return
+        self._last_tick_run = now
+
         # 0) 更新行情
         self.state.last_price = price
         self.state.bid = bid
         self.state.ask = ask
-        self.state.last_tick_ts = time.time()
+        self.state.last_tick_ts = now
 
         # 1) 兜底：无仓位但状态未归零 → 重置
         await self._fallback_reset()
@@ -96,7 +114,41 @@ class StrategyEngine:
         # 3) 推一次状态给前端
         await self.bus.publish("state", self.state.snapshot())
 
-    # =============== 兜底 ===============
+        # 4) 定期日志：每 10s 打印一次完整状态
+        if now - self._last_status_log >= self._status_log_interval:
+            self._last_status_log = now
+            self._log_status(price)
+
+    def _log_status(self, price: float) -> None:
+        cfg = self.cfg
+        cur_rsi, prev_rsi = self._rsi_values()
+        bull = self._htf_trend_bullish()
+        bear = self._htf_trend_bearish()
+        ma1 = self._htf_ma1()
+        ma2 = self._htf_ma2()
+        adx_v = self._htf_adx()
+        htf_close = self._htf_close()
+        mv, sv = self._htf_macd()
+
+        def t(b):
+            if b is None: return "?"
+            return "YES" if b else "NO"
+
+        self.log.info(
+            f"[状态] price={price} | "
+            f"RSI={f'{cur_rsi:.1f}' if cur_rsi else '?'}(prev={f'{prev_rsi:.1f}' if prev_rsi else '?'}) | "
+            f"HTF_close={f'{htf_close:.4f}' if htf_close else '?'} | "
+            f"MA1={f'{ma1:.4f}' if ma1 else '?'} MA2={f'{ma2:.4f}' if ma2 else '?'} | "
+            f"ADX={f'{adx_v:.2f}' if adx_v else '?'}(th={cfg.htf_adx_threshold}) | "
+            f"MACD_main={f'{mv:.4f}' if mv else '?'} sig={f'{sv:.4f}' if sv else '?'} | "
+            f"BULL={t(bull)} BEAR={t(bear)} | "
+            f"LONG={self.state.total_long_lots} SHORT={self.state.total_short_lots} | "
+            f"buy.active={self.state.buy.active} sell.active={self.state.sell.active} | "
+            f"daily={self.state.daily_open_count}/{cfg.daily_max_opens if cfg.enable_daily_open_limit else 'N/A'} | "
+            f"no_trade={self.state.in_no_trade_time} | "
+            f"wait_close={self.state.wait_after_close} wait_loss={self.state.wait_after_maxloss} | "
+            f"pnl={self.state.unrealized_pnl:.2f}"
+        )
     async def _fallback_reset(self) -> None:
         # 模拟盘：用 broker.positions 兜底
         positions = await self.broker.get_positions()
@@ -252,46 +304,118 @@ class StrategyEngine:
         return None, None
 
     async def _evaluate_entry(self, is_buy: bool) -> Tuple[bool, str]:
-        """与 MQ5 EvaluateEntryConditions 一致：所有启用条件 AND"""
+        """与 MQ5 EvaluateEntryConditions 一致：所有启用条件 AND。"""
+        cfg = self.cfg
         cur_rsi, prev_rsi = self._rsi_values()
-        cur_rsi = cur_rsi or 50.0
-        prev_rsi = prev_rsi or 50.0
+        cur_rsi = cur_rsi if cur_rsi is not None else 50.0
+        prev_rsi = prev_rsi if prev_rsi is not None else 50.0
         side = "BUY" if is_buy else "SELL"
-        notes = [f"{side} | RSI={cur_rsi:.2f}(prev={prev_rsi:.2f})"]
-        ok = True
+        all_pass = True
+        lines = []
 
-        if self.cfg.enable_check_rsi:
-            rsi_pass = False
+        def cond(name: str, ok: bool, detail: str):
+            nonlocal all_pass
+            if not ok:
+                all_pass = False
+            icon = "✓" if ok else "✗"
+            lines.append(f"{icon}{name}: {detail}")
+
+        # ① RSI 条件
+        if cfg.enable_check_rsi:
             if is_buy:
-                if cur_rsi < self.cfg.rsi_oversold:
+                preroll = self.state.buy.rsi_preroll_triggered
+                oversold_th = cfg.rsi_oversold
+                if cur_rsi < oversold_th:
                     self.state.buy.rsi_preroll_triggered = True
-                    rsi_pass = False
-                elif self.state.buy.rsi_preroll_triggered:
+                    cond("RSI", False,
+                         f"cur={cur_rsi:.1f} < oversold={oversold_th} → 等待K线收阳")
+                elif preroll:
                     o, c = self._current_candle_for_signal()
-                    if o is not None and c is not None and c > o:
-                        rsi_pass = True
-                        self.state.buy.rsi_preroll_triggered = False
+                    if o is not None and c is not None:
+                        bull_bar = c > o
+                        cond("RSI", bull_bar,
+                             f"cur={cur_rsi:.1f} ≥ oversold={oversold_th}，pre_triggered=YES，"
+                             f"K线 {'阳' if bull_bar else '阴'}(open={o} close={c})")
+                    else:
+                        cond("RSI", False, "cur≥oversold 但K线数据不足")
+                else:
+                    cond("RSI", False,
+                         f"cur={cur_rsi:.1f} ≥ oversold={oversold_th}，pre_triggered=NO")
             else:
-                if cur_rsi > self.cfg.rsi_overbought:
+                preroll = self.state.sell.rsi_preroll_triggered
+                overbought_th = cfg.rsi_overbought
+                if cur_rsi > overbought_th:
                     self.state.sell.rsi_preroll_triggered = True
-                    rsi_pass = False
-                elif self.state.sell.rsi_preroll_triggered:
+                    cond("RSI", False,
+                         f"cur={cur_rsi:.1f} > overbought={overbought_th} → 等待K线收阴")
+                elif preroll:
                     o, c = self._current_candle_for_signal()
-                    if o is not None and c is not None and c < o:
-                        rsi_pass = True
-                        self.state.sell.rsi_preroll_triggered = False
-            notes.append(f"RSI={'PASS' if rsi_pass else 'FAIL'}")
-            ok = ok and rsi_pass
+                    if o is not None and c is not None:
+                        bear_bar = c < o
+                        cond("RSI", bear_bar,
+                             f"cur={cur_rsi:.1f} ≤ overbought={overbought_th}，pre_triggered=YES，"
+                             f"K线 {'阴' if bear_bar else '阳'}(open={o} close={c})")
+                    else:
+                        cond("RSI", False, "cur≤overbought 但K线数据不足")
+                else:
+                    cond("RSI", False,
+                         f"cur={cur_rsi:.1f} ≤ overbought={overbought_th}，pre_triggered=NO")
+        else:
+            cond("RSI", True, "未启用")
 
-        if self.cfg.enable_check_htf:
-            trend = self._htf_trend_bullish() if is_buy else self._htf_trend_bearish()
-            htf_pass = bool(trend) if trend is not None else False
-            notes.append(f"HTF={'PASS' if htf_pass else 'FAIL'}")
-            ok = ok and htf_pass
+        # ② HTF 趋势条件
+        if cfg.enable_check_htf:
+            trend_ok = False
+            htf_close = self._htf_close()
+            if is_buy:
+                bull = self._htf_trend_bullish()
+                if htf_close is None:
+                    cond("HTF", False, "HTF K线数据不足，无法判断趋势")
+                elif bull is None:
+                    cond("HTF", False, f"close={htf_close}，指标数据不足")
+                elif bull:
+                    cond("HTF", True, f"BULL=True (close={htf_close} > MA1)")
+                else:
+                    cond("HTF", False, f"BULL=False (close={htf_close} ≤ MA1)")
+            else:
+                bear = self._htf_trend_bearish()
+                if htf_close is None:
+                    cond("HTF", False, "HTF K线数据不足")
+                elif bear is None:
+                    cond("HTF", False, f"close={htf_close}，指标数据不足")
+                elif bear:
+                    cond("HTF", True, f"BEAR=True (close={htf_close} < MA1)")
+                else:
+                    cond("HTF", False, f"BEAR=False (close={htf_close} ≥ MA1)")
+        else:
+            cond("HTF", True, "未启用")
 
-        self.state.last_eval_text = " ".join(notes)
+        # ③ 全局过滤
+        cond("日开仓限", not self.state.daily_limit_reached,
+             f"{self.state.daily_open_count}/{cfg.daily_max_opens}" if cfg.enable_daily_open_limit else "未启用")
+        cond("交易时段", not self.state.in_no_trade_time,
+             f"当前在禁止时段" if self.state.in_no_trade_time else "允许交易")
+        cond("平仓冷却", not self.state.wait_after_close,
+             f"冷却中({(time.time()-self.state.last_close_time)/60:.1f}min)"
+             if self.state.wait_after_close else "无冷却")
+        cond("亏损冷却", not self.state.wait_after_maxloss,
+             f"冷却中({(time.time()-self.state.last_maxloss_time)/60:.1f}min)"
+             if self.state.wait_after_maxloss else "无冷却")
+        cond("已有仓位", self.state.total_long_lots <= 0 and self.state.total_short_lots <= 0,
+             f"long={self.state.total_long_lots} short={self.state.total_short_lots}")
+
+        now = time.time()
+        summary = f"{side} {"PASS" if all_pass else "FAIL"}"
+        self.state.last_eval_text = summary
         self.state.last_eval_time = time.time()
-        return ok, self.state.last_eval_text
+        # 日志：只在变化时或超过 5s 才打印，避免刷屏
+        result_key = (side, all_pass, tuple(lines))
+        if now - self._last_eval_log >= self._eval_log_interval or result_key != self._last_eval_result.get(side):
+            self._last_eval_log = now
+            self._last_eval_result[side] = result_key
+            self.log.info(f"[{side}评估] {summary}\n  " + "\n  ".join(lines))
+
+        return all_pass, summary
 
     # =============== 信号检查 ===============
     async def _check_signals(self) -> None:
@@ -330,10 +454,10 @@ class StrategyEngine:
                 and not self.state.daily_limit_reached
                 and not self.state.wait_after_close
                 and not self.state.wait_after_maxloss
-                and not self.state.in_no_trade_time):
-            ok, text = await self._evaluate_entry(True)
+                and not self.state.in_no_trade_time
+                and self.state.total_long_lots <= 0 and self.state.total_short_lots <= 0):
+            ok, _ = await self._evaluate_entry(True)
             if ok:
-                self.log.info(f"多头信号触发：{text}，启动网格做多")
                 await self._start_buy_grid()
                 if cfg.enable_daily_open_limit and self.state.buy.active:
                     self.state.daily_open_count += 1
@@ -343,10 +467,10 @@ class StrategyEngine:
                 and not self.state.daily_limit_reached
                 and not self.state.wait_after_close
                 and not self.state.wait_after_maxloss
-                and not self.state.in_no_trade_time):
-            ok, text = await self._evaluate_entry(False)
+                and not self.state.in_no_trade_time
+                and self.state.total_long_lots <= 0 and self.state.total_short_lots <= 0):
+            ok, _ = await self._evaluate_entry(False)
             if ok:
-                self.log.info(f"空头信号触发：{text}，启动网格做空")
                 await self._start_sell_grid()
                 if cfg.enable_daily_open_limit and self.state.sell.active:
                     self.state.daily_open_count += 1

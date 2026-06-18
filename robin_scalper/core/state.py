@@ -83,6 +83,8 @@ class EngineState:
     unrealized_pnl: float = 0.0
     # 错误
     last_error: str = ""
+    # 延迟
+    ws_latency_ms: float = 0.0  # 最后一次延迟（ms）
 
     def snapshot(self) -> dict:
         d = asdict(self)

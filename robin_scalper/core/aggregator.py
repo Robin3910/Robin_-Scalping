@@ -129,3 +129,32 @@ class CandleAggregator:
         if c is None:
             return None, None
         return c.open, c.close
+
+    def load_history(self, symbol: str, testnet: bool = True,
+                     limit: int = 200, log_fn=None) -> None:
+        """启动时从 Binance REST API 拉取历史 K 线填充 history。"""
+        import requests
+        rest = "https://testnet.binancefuture.com" if testnet else "https://fapi.binance.com"
+        for tf in self.timeframes:
+            try:
+                params = {"symbol": symbol.upper(), "interval": tf, "limit": limit}
+                r = requests.get(f"{rest}/fapi/v1/klines", params=params, timeout=15)
+                r.raise_for_status()
+                klines = r.json()
+                for k in klines:
+                    ts_ms = int(k[0])
+                    candle = Candle(
+                        timestamp=ts_ms,
+                        open=float(k[1]),
+                        high=float(k[2]),
+                        low=float(k[3]),
+                        close=float(k[4]),
+                        volume=float(k[5]),
+                        is_closed=True,
+                    )
+                    self.history[tf].append(candle)
+                if log_fn:
+                    log_fn(f"历史 K 线加载：{symbol} {tf} ×{len(klines)} 根")
+            except Exception as e:
+                if log_fn:
+                    log_fn(f"历史 K 线加载失败：{tf} {e}")

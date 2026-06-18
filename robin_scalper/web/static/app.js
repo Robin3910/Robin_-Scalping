@@ -1,20 +1,53 @@
-// Robin Scalper 前端
+// Robin Scalper 前端 - Premium Dashboard
 (() => {
   let cfg = null;
   let snapshot = null;
   let ws = null;
   let logLines = [];
+  let lastPrices = {};
 
   // ---- 工具 ----
   const $ = (id) => document.getElementById(id);
   const fmt = (v, d=4) => v == null || v === 0 ? '--' : Number(v).toFixed(d);
-  const fmtPct = (v) => v == null ? '--' : `${(v*100).toFixed(2)}%`;
+
+  // ---- 动画效果 ----
+  function animateValueChange(element, isPositive) {
+    if (!element) return;
+    element.classList.remove('value-up', 'value-down');
+    void element.offsetWidth;
+    element.classList.add(isPositive ? 'value-up' : 'value-down');
+  }
+
+  function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<span class="toast-icon">${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</span><span>${message}</span>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
 
   function setBadge(id, on, onText, offText) {
     const el = $(id);
     el.classList.toggle('on', on);
     el.classList.toggle('off', !on);
     el.textContent = on ? onText : offText;
+  }
+
+  // ---- 标签页切换 ----
+  function initTabs() {
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        $(`tab-${target}`).classList.add('active');
+      });
+    });
   }
 
   // ---- WebSocket ----
@@ -24,6 +57,7 @@
     $('connText').textContent = '连接中…';
     ws.onopen = () => {
       $('conn').classList.add('on');
+      $('conn').classList.remove('off');
       $('connText').textContent = '已连接';
     };
     ws.onclose = () => {
@@ -45,22 +79,19 @@
       applyState(env.data);
     } else if (env.topic === 'log') {
       const entries = env.data.entries || [];
-      // 增量追加
       const lastTs = logLines.length ? logLines[logLines.length-1].ts : 0;
       for (const e of entries) {
         if (e.ts > lastTs) appendLog(e);
       }
-    } else if (env.topic === 'tick') {
-      // 节流：在 applyState 时也会更新
     }
   }
 
   function applySnapshot(s) {
     snapshot = s;
     cfg = s.config;
+    lastPrices = {};
     applyConfigToForm();
     applyState(s.state);
-    // 填充日志
     for (const e of s.log) appendLog(e, false);
     flushLog();
   }
@@ -68,13 +99,44 @@
   function applyState(st) {
     snapshot.state = st;
     $('sym').textContent = `${cfg.symbol} · ${cfg.leverage}x`;
+
+    // 价格变化动画
+    const lastEl = $('last');
+    const newPrice = st.last_price;
+    if (lastPrices['last'] !== undefined && lastPrices['last'] !== newPrice) {
+      animateValueChange(lastEl, newPrice > lastPrices['last']);
+      lastEl.style.color = newPrice > lastPrices['last'] ? 'var(--success)' : 'var(--danger)';
+      setTimeout(() => { lastEl.style.color = ''; }, 300);
+    }
+    lastPrices['last'] = newPrice;
     $('last').textContent = fmt(st.last_price, 2);
-    $('last').className = 'big' + (st.last_price > 0 ? '' : '');
+
     $('bid').textContent = fmt(st.bid, 2);
     $('ask').textContent = fmt(st.ask, 2);
+
+    // RSI
+    const rsiEl = $('rsi');
+    const newRsi = st.rsi;
+    if (lastPrices['rsi'] !== undefined && lastPrices['rsi'] !== newRsi) {
+      animateValueChange(rsiEl, newRsi > lastPrices['rsi']);
+    }
+    lastPrices['rsi'] = newRsi;
     $('rsi').textContent = fmt(st.rsi, 1);
     $('evalText').textContent = st.last_eval_text || '--';
 
+    // RSI 条
+    const rsiFill = document.querySelector('.rsi-fill');
+    if (rsiFill && newRsi != null) {
+      const pct = Math.min(100, Math.max(0, (newRsi / 100) * 100));
+      rsiFill.style.width = pct + '%';
+    }
+
+    // 延迟
+    const lat = st.ws_latency_ms || 0;
+    $('latency').textContent = lat > 0 ? `延迟 ${lat.toFixed(0)}ms` : '延迟 --';
+    $('latency').className = lat > 0 ? (lat < 100 ? 'good' : lat < 500 ? 'warn' : 'bad') : 'muted';
+
+    // HTF
     $('htfTF').textContent = cfg.htf_timeframe;
     const t = $('htfTrend');
     t.textContent = st.htf_trend || '震荡';
@@ -85,12 +147,35 @@
     $('htfADX').textContent = fmt(st.htf_adx, 1);
     $('htfMACD').textContent = `${fmt(st.htf_macd_main, 4)} / ${fmt(st.htf_macd_signal, 4)}`;
 
+    // 持仓
+    const longEl = $('longL');
+    const shortEl = $('shortL');
+    const newLong = st.total_long_lots;
+    const newShort = st.total_short_lots;
+    if (lastPrices['long'] !== undefined && lastPrices['long'] !== newLong) {
+      animateValueChange(longEl, newLong > lastPrices['long']);
+    }
+    if (lastPrices['short'] !== undefined && lastPrices['short'] !== newShort) {
+      animateValueChange(shortEl, newShort < lastPrices['short']);
+    }
+    lastPrices['long'] = newLong;
+    lastPrices['short'] = newShort;
+
     $('longL').textContent = fmt(st.total_long_lots, 3);
     $('shortL').textContent = fmt(st.total_short_lots, 3);
-    const upnl = $('upnl');
-    upnl.textContent = `${st.unrealized_pnl >= 0 ? '+' : ''}${fmt(st.unrealized_pnl, 2)} USDT`;
-    upnl.className = 'big ' + (st.unrealized_pnl >= 0 ? 'pos' : 'neg');
 
+    // 浮盈
+    const upnl = $('upnl');
+    const newUpnl = st.unrealized_pnl;
+    if (lastPrices['upnl'] !== undefined && lastPrices['upnl'] !== newUpnl) {
+      animateValueChange(upnl, newUpnl >= lastPrices['upnl']);
+    }
+    lastPrices['upnl'] = newUpnl;
+
+    upnl.textContent = `${st.unrealized_pnl >= 0 ? '+' : ''}${fmt(st.unrealized_pnl, 2)}`;
+    upnl.className = 'pnl-value ' + (st.unrealized_pnl >= 0 ? 'pos' : 'neg');
+
+    // 风险标签
     $('tagNoTrade').classList.toggle('on', !!st.in_no_trade_time);
     $('tagNoTrade').textContent = st.in_no_trade_time ? '在不做单时段' : '不在不做单时段';
     $('tagDaily').classList.toggle('on', !!st.daily_limit_reached);
@@ -98,12 +183,15 @@
     $('tagWait').classList.toggle('on', !!(st.wait_after_close || st.wait_after_maxloss));
     $('tagWait').textContent = (st.wait_after_close || st.wait_after_maxloss) ? '在等待中' : '未在平仓后等待';
 
-    // 多头
-    $('buyActive').textContent = st.buy.active ? '是' : '否';
+    // 多头/空头状态
+    $('buyActive').textContent = st.buy.active ? '激活' : '未激活';
+    $('buyActive').className = 'badge ' + (st.buy.active ? 'on' : 'off');
     $('buyAvg').textContent = fmt(st.buy.avg_price, 4);
     $('buyTrail').textContent = fmt(st.buy.trail_level, 4);
     renderGrid('buyTable', st.buy.grids);
-    $('sellActive').textContent = st.sell.active ? '是' : '否';
+
+    $('sellActive').textContent = st.sell.active ? '激活' : '未激活';
+    $('sellActive').className = 'badge ' + (st.sell.active ? 'on' : 'off');
     $('sellAvg').textContent = fmt(st.sell.avg_price, 4);
     $('sellTrail').textContent = fmt(st.sell.trail_level, 4);
     renderGrid('sellTable', st.sell.grids);
@@ -122,12 +210,13 @@
     const tb = $(tableId).querySelector('tbody');
     tb.innerHTML = '';
     if (!grids || !grids.length) {
-      tb.innerHTML = '<tr><td colspan="3" class="muted" style="text-align:center">-- 无 --</td></tr>';
+      tb.innerHTML = '<tr><td colspan="3" class="muted" style="text-align:center;padding:12px">-- 无挂单 --</td></tr>';
       return;
     }
-    grids.forEach((g) => {
+    grids.forEach((g, i) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${g.index}</td><td>${fmt(g.entry_price, 4)}</td><td>${fmt(g.lot_size, 3)}</td>`;
+      if (i >= 0) tr.style.animation = 'slideIn 0.2s ease-out';
       tb.appendChild(tr);
     });
   }
@@ -137,18 +226,21 @@
       logLines.push(e);
       if (logLines.length > 500) logLines = logLines.slice(-500);
       const box = $('log');
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `<span class="ts">${e.tstr}</span><span class="l-${(e.level||'info').toLowerCase()}">${e.msg}</span>`;
-      box.appendChild(row);
-      // 自动滚动到底
-      box.scrollTop = box.scrollHeight;
+      if (box) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.style.animation = 'slideIn 0.2s ease-out';
+        row.innerHTML = `<span class="ts">${e.tstr}</span><span class="l-${(e.level||'info').toLowerCase()}">${e.msg}</span>`;
+        box.appendChild(row);
+        box.scrollTop = box.scrollHeight;
+      }
     } else {
       logLines.push(e);
     }
   }
   function flushLog() {
     const box = $('log');
+    if (!box) return;
     box.innerHTML = '';
     logLines.slice(-200).forEach((e) => {
       const row = document.createElement('div');
@@ -162,13 +254,15 @@
   function applyConfigToForm() {
     document.querySelectorAll('[data-cfg]').forEach((el) => {
       const k = el.dataset.cfg;
-      if (!(k in cfg)) return;
+      if (!cfg || !(k in cfg)) return;
       const v = cfg[k];
       if (el.type === 'checkbox') el.checked = !!v;
       else el.value = v;
     });
-    $('tradingMode').value = cfg.paper_trading ? 'paper' : 'live';
-    $('testnet').value = cfg.testnet ? 'true' : 'false';
+    const tm = $('tradingMode');
+    const tn = $('testnet');
+    if (tm) tm.value = cfg.paper_trading ? 'paper' : 'live';
+    if (tn) tn.value = cfg.testnet ? 'true' : 'false';
   }
   function collectConfig() {
     const out = {...cfg};
@@ -179,8 +273,10 @@
             : el.value;
       out[k] = v;
     });
-    out.paper_trading = $('tradingMode').value === 'paper';
-    out.testnet = $('testnet').value === 'true';
+    const tm = $('tradingMode');
+    const tn = $('testnet');
+    if (tm) out.paper_trading = tm.value === 'paper';
+    if (tn) out.testnet = tn.value === 'true';
     return out;
   }
 
@@ -189,49 +285,161 @@
     const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {}) });
     return r.json();
   }
-  async function getJSON(url) {
-    const r = await fetch(url); return r.json();
+
+  function setButtonLoading(btn, loading, originalText) {
+    if (loading) {
+      btn.disabled = true;
+      btn.dataset.originalText = btn.textContent;
+      btn.textContent = '...';
+    } else {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalText || originalText;
+    }
   }
 
-  $('btnStart').onclick = async () => { await postJSON('/api/control', {action:'start'}); };
-  $('btnStop').onclick  = async () => { await postJSON('/api/control', {action:'stop'}); };
-  $('btnCloseAll').onclick = async () => {
-    if (!confirm('确认全部平仓？')) return;
-    await postJSON('/api/control', {action:'close_all'});
-  };
-  $('btnSaveCfg').onclick = async () => {
+  // 保存配置的通用函数
+  async function saveConfig() {
     const c = collectConfig();
     const r = await postJSON('/api/config', c);
     if (r.ok) {
-      $('cfgTip').textContent = '已保存 ' + new Date().toLocaleTimeString();
+      $('cfgTip').textContent = '✓ 已保存 ' + new Date().toLocaleTimeString();
+      $('cfgTip').className = 'good';
       cfg = r.config;
+      showToast('配置已保存', 'success');
+      setTimeout(() => { $('cfgTip').textContent = ''; $('cfgTip').className = 'muted'; }, 3000);
     } else {
-      $('cfgTip').textContent = '保存失败：' + (r.error || '?');
+      $('cfgTip').textContent = '✕ 保存失败：' + (r.error || '?');
+      $('cfgTip').className = 'bad';
+      showToast('保存失败', 'error');
+      setTimeout(() => { $('cfgTip').textContent = ''; $('cfgTip').className = 'muted'; }, 3000);
     }
+  }
+
+  $('btnStart').onclick = async () => {
+    setButtonLoading($('btnStart'), true, '▶ 启动');
+    const r = await postJSON('/api/control', {action:'start'});
+    if (r.ok) {
+      setBadge('runStat', true, '运行中', '未运行');
+      showToast('策略已启动', 'success');
+    } else {
+      alert('启动失败：' + (r.error || '?'));
+      showToast('启动失败', 'error');
+    }
+    setButtonLoading($('btnStart'), false, '▶ 启动');
   };
 
-  // 启动时拉一次快照
-  getJSON('/api/snapshot').then((s) => { snapshot = s; cfg = s.config; applyConfigToForm(); applyState(s.state); });
-  connectWS();
+  $('btnStop').onclick = async () => {
+    setButtonLoading($('btnStop'), true, '■ 停止');
+    const r = await postJSON('/api/control', {action:'stop'});
+    if (r.ok) {
+      setBadge('runStat', false, '运行中', '未运行');
+      showToast('策略已停止', 'info');
+    } else {
+      alert('停止失败：' + (r.error || '?'));
+      showToast('停止失败', 'error');
+    }
+    setButtonLoading($('btnStop'), false, '■ 停止');
+  };
 
-  // 切换模式时给出提示
-  $('tradingMode').addEventListener('change', async () => {
+  $('btnCloseAll').onclick = async () => {
+    if (!confirm('确认全部平仓？')) return;
+    setButtonLoading($('btnCloseAll'), true, '⚡ 平仓');
+    await postJSON('/api/control', {action:'close_all'});
+    showToast('已发送全部平仓指令', 'info');
+    setButtonLoading($('btnCloseAll'), false, '⚡ 平仓');
+  };
+
+  // 两个保存按钮
+  $('btnSaveCfg')?.addEventListener('click', saveConfig);
+  $('btnSaveCfg2')?.addEventListener('click', saveConfig);
+
+  // 交易模式切换
+  $('tradingMode')?.addEventListener('change', async () => {
     const mode = $('tradingMode').value;
     if (mode === 'live') {
-      const key = $('apiKey').value.trim();
-      const sec = $('apiSec').value.trim();
+      const key = $('apiKey')?.value.trim();
+      const sec = $('apiSec')?.value.trim();
       if (!key || !sec) {
-        alert('请先填写 API Key 和 Secret，再切换到真实盘');
+        alert('请先填写 API Key 和 Secret');
         $('tradingMode').value = 'paper';
+        showToast('请填写 API 凭证', 'error');
         return;
       }
       const r = await postJSON('/api/control', {action:'switch_live', api_key: key, api_secret: sec});
       if (!r.ok) {
         alert('切换失败：' + (r.error || '?'));
         $('tradingMode').value = 'paper';
+        showToast('切换真实盘失败', 'error');
+      } else {
+        showToast('已切换到真实交易模式', 'success');
+        closeTradingModal();
       }
     } else {
       await postJSON('/api/control', {action:'switch_paper'});
+      showToast('已切换到模拟盘模式', 'info');
+      closeTradingModal();
+    }
+  });
+
+  // 初始化
+  initTabs();
+  getJSON('/api/snapshot').then((s) => { snapshot = s; cfg = s.config; applyConfigToForm(); applyState(s.state); }).catch(console.error);
+  connectWS();
+
+  // 辅助函数
+  async function getJSON(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('API error');
+    return r.json();
+  }
+
+  // 键盘快捷键
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 's' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      $('btnStart')?.click();
+    } else if (e.key === 'x' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      $('btnStop')?.click();
     }
   });
 })();
+
+// 弹窗控制函数
+function closeTradingModal() {
+  const modal = document.getElementById('tradingModal');
+  if (modal) modal.style.display = 'none';
+}
+
+// Toast 样式
+const toastStyle = document.createElement('style');
+toastStyle.textContent = `
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: #1a1a24;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    font-size: 13px;
+    color: #fff;
+    transform: translateX(120%);
+    transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    z-index: 9999;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast-success { border-color: rgba(34, 197, 94, 0.4); background: linear-gradient(135deg, #1a1a24, rgba(34, 197, 94, 0.1)); }
+  .toast-error { border-color: rgba(239, 68, 68, 0.4); background: linear-gradient(135deg, #1a1a24, rgba(239, 68, 68, 0.1)); }
+  .toast-info { border-color: rgba(99, 102, 241, 0.4); background: linear-gradient(135deg, #1a1a24, rgba(99, 102, 241, 0.1)); }
+  .toast-icon { font-size: 16px; }
+  .toast-success .toast-icon { color: #22c55e; }
+  .toast-error .toast-icon { color: #ef4444; }
+  .toast-info .toast-icon { color: #6366f1; }
+`;
+document.head.appendChild(toastStyle);
