@@ -90,6 +90,15 @@ def api_snapshot():
     return jsonify(app.snapshot())
 
 
+@app_flask.route("/api/klines", methods=["GET"])
+@login_required
+def api_klines():
+    tf = request.args.get("tf", "1m")
+    limit = request.args.get("limit", 200, type=int)
+    klines = app.get_klines(tf, min(limit, 1000))
+    return jsonify({"ok": True, "tf": tf, "klines": klines, "ts": time.time()})
+
+
 @app_flask.route("/api/config", methods=["GET", "POST"])
 @login_required
 def api_config():
@@ -214,8 +223,10 @@ def ws_conn(ws):
     def on_state(env): push(env)
     def on_tick(env): push(env)
     def on_log(env): push(env)
+    def on_kline(env): push(env)
     app.bus.subscribe("state", on_state)
     app.bus.subscribe("tick", on_tick)
+    app.bus.subscribe("kline", on_kline)
     # 日志也通过：单独一个子通道
     last_log_idx = [0]
 
@@ -231,6 +242,19 @@ def ws_conn(ws):
             time.sleep(1.0)
     t = threading.Thread(target=log_pusher, daemon=True)
     t.start()
+
+    # K 线推送线程：定期推送当前 K 线状态
+    def kline_pusher():
+        last_tf = "1m"
+        while not stop_flag[0]:
+            try:
+                klines = app.get_klines(last_tf, 100)
+                push({"topic": "klines", "ts": time.time(), "data": {"tf": last_tf, "klines": klines}})
+            except Exception:
+                break
+            time.sleep(2.0)  # 每2秒推送一次
+    tk = threading.Thread(target=kline_pusher, daemon=True)
+    tk.start()
 
     try:
         while True:
@@ -253,3 +277,4 @@ def ws_conn(ws):
         stop_flag[0] = True
         app.bus.unsubscribe("state", on_state)
         app.bus.unsubscribe("tick", on_tick)
+        app.bus.unsubscribe("kline", on_kline)

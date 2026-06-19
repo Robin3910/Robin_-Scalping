@@ -160,6 +160,22 @@ class App:
         else:
             await self.engine._close_all_sell()
 
+    # ====== K 线数据 API ======
+    def get_klines(self, tf: str = "1m", limit: int = 200) -> list:
+        """获取 K 线数据用于图表展示"""
+        candles = self.agg.get_ohlcv(tf, limit)
+        result = []
+        for c in candles:
+            result.append({
+                "time": int(c.timestamp / 1000),  # Unix timestamp (秒)
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+            })
+        return result
+
     # ====== 状态快照 ======
     def snapshot(self) -> dict:
         # 每次取时再算一些指标快照
@@ -179,10 +195,16 @@ class App:
         mv, sv = self.engine._htf_macd()
         self.state.htf_macd_main = mv or 0.0
         self.state.htf_macd_signal = sv or 0.0
+
+        # K线数据（用于图表）
+        klines = self.get_klines("1m", 200)
+
         return {
             "state": self.state.snapshot(),
             "config": self.cfg.to_dict(),
             "log": self.log.tail(100),
+            "klines": klines,
+            "klines_tf": "1m",
             "ts": time.time(),
         }
 

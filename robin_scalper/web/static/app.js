@@ -6,9 +6,162 @@
   let logLines = [];
   let lastPrices = {};
 
+  // ---- 图表相关 ----
+  let chart = null;
+  let candleSeries = null;
+  let volumeSeries = null;
+  let currentTf = '1m';
+  let chartInitialized = false;
+  let lastKlineUpdate = 0;
+
   // ---- 工具 ----
   const $ = (id) => document.getElementById(id);
   const fmt = (v, d=4) => v == null || v === 0 ? '--' : Number(v).toFixed(d);
+
+  // ---- 图表初始化 ----
+  function initChart() {
+    if (typeof LightweightCharts === 'undefined') {
+      console.warn('LightweightCharts 未加载');
+      return;
+    }
+
+    const container = $('kline-chart');
+    if (!container) return;
+
+    // 创建图表
+    chart = LightweightCharts.createChart(container, {
+      layout: {
+        background: { type: 'solid', color: '#1a1a24' },
+        textColor: '#a0a0b0',
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: {
+          color: 'rgba(99, 102, 241, 0.5)',
+          width: 1,
+          style: LightweightCharts.LineStyle.Dashed,
+        },
+        horzLine: {
+          color: 'rgba(99, 102, 241, 0.5)',
+          width: 1,
+          style: LightweightCharts.LineStyle.Dashed,
+        },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        scaleMargins: { top: 0.1, bottom: 0.2 },
+      },
+      timeScale: {
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      handleScale: { axisPressedMouseMove: true },
+      handleScroll: { vertTouchDrag: false },
+    });
+
+    // 蜡烛图系列
+    candleSeries = chart.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+    });
+
+    // 成交量系列
+    volumeSeries = chart.addHistogramSeries({
+      color: '#6366f1',
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+
+    // 响应式调整
+    const resizeObserver = new ResizeObserver((entries) => {
+      if (entries.length === 0 || entries[0].target !== container) return;
+      const { width, height } = entries[0].contentRect;
+      chart.applyOptions({ width, height });
+    });
+    resizeObserver.observe(container);
+
+    // 加载初始数据
+    loadKlines(currentTf);
+
+    chartInitialized = true;
+    $('chartStatus').textContent = '已连接';
+  }
+
+  async function loadKlines(tf) {
+    try {
+      const r = await fetch(`/api/klines?tf=${tf}&limit=300`);
+      const data = await r.json();
+      if (data.ok && data.klines && data.klines.length > 0) {
+        updateChartData(data.klines, tf);
+        $('chartStatus').textContent = `已加载 ${data.klines.length} 根K线`;
+        $('chartCandleCount').textContent = `${tf}`;
+      } else {
+        $('chartStatus').textContent = '暂无数据';
+      }
+    } catch (e) {
+      console.error('加载K线失败:', e);
+      $('chartStatus').textContent = '加载失败';
+    }
+  }
+
+  function updateChartData(klines, tf) {
+    if (!chartInitialized || !candleSeries) return;
+
+    const candleData = klines.map(k => ({
+      time: k.time,
+      open: k.open,
+      high: k.high,
+      low: k.low,
+      close: k.close,
+    }));
+
+    const volumeData = klines.map(k => ({
+      time: k.time,
+      value: k.volume,
+      color: k.close >= k.open ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+    }));
+
+    candleSeries.setData(candleData);
+    volumeSeries.setData(volumeData);
+    chart.timeScale().fitContent();
+
+    if (tf) currentTf = tf;
+    $('chartCandleCount').textContent = `${currentTf} · ${klines.length}根`;
+  }
+
+  function updateLastCandle(price) {
+    if (!chartInitialized || !candleSeries) return;
+
+    const now = Date.now();
+    const tfSeconds = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
+    const sec = tfSeconds[currentTf] || 60;
+    const bucketTime = Math.floor(now / 1000 / sec) * sec;
+
+    // 更新最新一根K线
+    try {
+      candleSeries.update({
+        time: bucketTime,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+      });
+    } catch (e) {
+      // 忽略
+    }
+  }
 
   // ---- 动画效果 ----
   function animateValueChange(element, isPositive) {
@@ -50,6 +203,19 @@
     });
   }
 
+  // ---- 图表时间周期切换 ----
+  function initChartTimeframes() {
+    document.querySelectorAll('.tf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tf = btn.dataset.tf;
+        document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTf = tf;
+        loadKlines(tf);
+      });
+    });
+  }
+
   // ---- WebSocket ----
   function connectWS() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -75,8 +241,16 @@
   function onMessage(env) {
     if (env.topic === 'snapshot') {
       applySnapshot(env.data);
+      // 快照中也包含K线数据
+      if (env.data.klines) {
+        updateChartData(env.data.klines, env.data.klines_tf || '1m');
+      }
     } else if (env.topic === 'state') {
       applyState(env.data);
+      // 实时更新K线
+      updateLastCandle(env.data.last_price);
+    } else if (env.topic === 'klines') {
+      updateChartData(env.data.klines, env.data.tf);
     } else if (env.topic === 'log') {
       const entries = env.data.entries || [];
       const lastTs = logLines.length ? logLines[logLines.length-1].ts : 0;
@@ -383,8 +557,16 @@
 
   // 初始化
   initTabs();
+  initChartTimeframes();
   getJSON('/api/snapshot').then((s) => { snapshot = s; cfg = s.config; applyConfigToForm(); applyState(s.state); }).catch(console.error);
   connectWS();
+
+  // 延迟初始化图表，等待 DOM 加载完成
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initChart);
+  } else {
+    setTimeout(initChart, 100);
+  }
 
   // 辅助函数
   async function getJSON(url) {
