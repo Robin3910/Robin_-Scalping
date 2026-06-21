@@ -54,10 +54,51 @@ class App:
 
     # ====== 配置切换 ======
     def update_config(self, new_cfg: Config, persist: bool = True) -> None:
+        old_symbol = self.cfg.symbol
         self.cfg = new_cfg
         if persist:
             save_config(self.cfg)
         self.log.info(f"配置已更新：symbol={self.cfg.symbol} paper={self.cfg.paper_trading}")
+
+        # 如果 symbol 变了，不管运行与否都要重建 feed
+        if old_symbol != self.cfg.symbol:
+            self._rebuild_feed()
+            self.agg.clear_all()
+            self.log.info(f"Symbol 变更：{old_symbol} → {self.cfg.symbol}，数据已清空")
+
+        # 如果运行时还有额外操作
+        if self._running:
+            self.feed.stop()
+            # 等待旧线程真正退出
+            for t in self.feed._threads:
+                t.join(timeout=5)
+            # 重建 broker（模拟盘/真实盘）
+            if self.cfg.paper_trading:
+                self.broker = PaperBroker(
+                    symbol=self.cfg.symbol, bus=self.bus, log=self.log,
+                    leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
+                )
+            else:
+                self.broker = BinanceBroker(
+                    symbol=self.cfg.symbol, api_key="", api_secret="",
+                    bus=self.bus, log=self.log, testnet=self.cfg.testnet,
+                    leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
+                )
+            self.engine.broker = self.broker
+            # 清空旧数据并重新加载历史 K 线
+            self.agg.clear_all()
+            self.agg.load_history(
+                symbol=self.cfg.symbol,
+                testnet=self.cfg.testnet,
+                limit=200,
+                log_fn=self.log.info,
+            )
+            self.feed.start()
+
+    def _rebuild_feed(self) -> None:
+        """重建 feed，不管运行与否"""
+        self.feed = BinanceFeed(self.bus, self.agg, self.log,
+                                symbol=self.cfg.symbol, testnet=self.cfg.testnet)
 
     def reload_config(self) -> None:
         self.cfg = load_config()
@@ -144,6 +185,7 @@ class App:
         self._running = False
         self.state.running = False
         self.feed.stop()
+        self._rebuild_feed()
         self.log.info("策略已停止")
 
     # ====== 手动控制 ======

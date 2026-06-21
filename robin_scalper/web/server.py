@@ -105,7 +105,9 @@ def api_config():
     if request.method == "GET":
         return jsonify(app.cfg.to_dict())
     data = request.get_json(force=True, silent=True) or {}
-    # 不允许覆盖的字段
+    # 运行中禁止修改参数
+    if app._running:
+        return jsonify({"ok": False, "error": "策略运行中，请先停止后再修改参数"}), 400
     data.pop("htf_ma_period1", None)
     data.pop("rsi_overbought", None)
     data.pop("rsi_oversold", None)

@@ -26,9 +26,14 @@
     }
 
     const container = $('kline-chart');
-    if (!container) return;
+    if (!container) {
+      console.warn('图表容器 kline-chart 不存在');
+      return;
+    }
 
-    // 创建图表
+    console.log('开始初始化图表, 容器尺寸:', container.offsetWidth, 'x', container.offsetHeight);
+
+    // 创建图表 - v4 API
     chart = LightweightCharts.createChart(container, {
       layout: {
         background: { type: 'solid', color: '#1a1a24' },
@@ -63,8 +68,9 @@
       handleScale: { axisPressedMouseMove: true },
       handleScroll: { vertTouchDrag: false },
     });
+    console.log('图表对象已创建:', chart);
 
-    // 蜡烛图系列
+    // v4 API：蜡烛图系列
     candleSeries = chart.addCandlestickSeries({
       upColor: '#22c55e',
       downColor: '#ef4444',
@@ -73,8 +79,9 @@
       wickUpColor: '#22c55e',
       wickDownColor: '#ef4444',
     });
+    console.log('蜡烛图系列已创建:', candleSeries);
 
-    // 成交量系列
+    // v4 API：成交量系列
     volumeSeries = chart.addHistogramSeries({
       color: '#6366f1',
       priceFormat: { type: 'volume' },
@@ -83,6 +90,7 @@
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
+    console.log('成交量系列已创建:', volumeSeries);
 
     // 响应式调整
     const resizeObserver = new ResizeObserver((entries) => {
@@ -118,6 +126,18 @@
 
   function updateChartData(klines, tf) {
     if (!chartInitialized || !candleSeries) return;
+
+    // 调试：检查数据格式
+    if (klines && klines.length > 0) {
+      console.log('图表数据更新:', {
+        '数据条数': klines.length,
+        '第一条时间戳': klines[0].time,
+        '第一条时间(可读)': new Date(klines[0].time * 1000).toISOString(),
+        '最后一条时间戳': klines[klines.length-1].time,
+        '最后一条时间(可读)': new Date(klines[klines.length-1].time * 1000).toISOString(),
+        '样本数据': klines.slice(0, 2)
+      });
+    }
 
     const candleData = klines.map(k => ({
       time: k.time,
@@ -482,10 +502,11 @@
       showToast('配置已保存', 'success');
       setTimeout(() => { $('cfgTip').textContent = ''; $('cfgTip').className = 'muted'; }, 3000);
     } else {
-      $('cfgTip').textContent = '✕ 保存失败：' + (r.error || '?');
+      const errMsg = r.error || '?';
+      $('cfgTip').textContent = '✕ 保存失败：' + errMsg;
       $('cfgTip').className = 'bad';
-      showToast('保存失败', 'error');
-      setTimeout(() => { $('cfgTip').textContent = ''; $('cfgTip').className = 'muted'; }, 3000);
+      alert('保存失败：' + errMsg + '\n\n请先停止策略后再修改参数');
+      setTimeout(() => { $('cfgTip').textContent = ''; $('cfgTip').className = 'muted'; }, 5000);
     }
   }
 

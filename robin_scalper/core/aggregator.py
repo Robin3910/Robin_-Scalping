@@ -63,6 +63,12 @@ class CandleAggregator:
         # 每个周期一个 deque 历史
         self.history: Dict[str, Deque[Candle]] = {tf: deque(maxlen=maxlen) for tf in self.timeframes}
 
+    def clear_all(self) -> None:
+        """清空所有周期的历史和当前 K 线，切换交易对时调用"""
+        self.current = {tf: None for tf in self.timeframes}
+        for tf in self.timeframes:
+            self.history[tf].clear()
+
     @staticmethod
     def _bucket_start(ts_ms: int, period_sec: int) -> int:
         sec = ts_ms // 1000
