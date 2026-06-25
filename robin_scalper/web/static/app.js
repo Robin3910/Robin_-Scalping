@@ -391,9 +391,15 @@
     renderGrid('sellTable', st.sell.grids);
 
     // 模式/状态
-    setBadge('mode', st.paper_trading, '模拟盘', '真实盘');
-    $('mode').classList.toggle('paper', st.paper_trading);
-    $('mode').classList.toggle('live', !st.paper_trading);
+    const isTestnetPaper = st.paper_trading && cfg.use_testnet_paper;
+    if (isTestnetPaper) {
+      setBadge('mode', true, 'Testnet 模拟盘', 'Testnet 模拟盘');
+      $('mode').classList.add('testnet-paper');
+    } else {
+      setBadge('mode', st.paper_trading, '模拟盘', '真实盘');
+      $('mode').classList.toggle('paper', st.paper_trading);
+      $('mode').classList.toggle('live', !st.paper_trading);
+    }
     setBadge('runStat', st.running, '运行中', '未运行');
 
     // RSI 派生
@@ -547,6 +553,53 @@
   // 两个保存按钮
   $('btnSaveCfg')?.addEventListener('click', saveConfig);
   $('btnSaveCfg2')?.addEventListener('click', saveConfig);
+
+  // 测试连接按钮
+  $('btnTestConn')?.addEventListener('click', async () => {
+    const key = $('apiKey')?.value.trim();
+    const sec = $('apiSec')?.value.trim();
+    if (!key || !sec) {
+      alert('请先填写 API Key 和 Secret');
+      return;
+    }
+    setButtonLoading($('btnTestConn'), true, '🔌 测试连接');
+    try {
+      const testnet = $('testnet')?.value === 'true' || true;
+      const r = await postJSON('/api/test-credentials', { api_key: key, api_secret: sec, testnet });
+      if (r.ok) {
+        const acc = r.account || {};
+        alert(`✅ 连接成功！\n\n资产: ${acc.asset}\n总权益: ${acc.totalBalance?.toFixed(4) || 0}\n可以点击「保存」来使用此凭证。`);
+        showToast('连接成功', 'success');
+      } else {
+        alert(`❌ 连接失败：${r.error || '未知错误'}`);
+        showToast('连接失败', 'error');
+      }
+    } catch (e) {
+      alert('❌ 测试失败: ' + e.message);
+      showToast('测试失败', 'error');
+    }
+    setButtonLoading($('btnTestConn'), false, '🔌 测试连接');
+  });
+
+  // 保存凭证按钮
+  $('btnSaveCreds')?.addEventListener('click', async () => {
+    const key = $('apiKey')?.value.trim();
+    const sec = $('apiSec')?.value.trim();
+    if (!key || !sec) {
+      alert('请先填写 API Key 和 Secret');
+      return;
+    }
+    setButtonLoading($('btnSaveCreds'), true, '💾 保存');
+    const r = await postJSON('/api/credentials', { api_key: key, api_secret: sec });
+    if (r.ok) {
+      alert('✅ 凭证已保存（仅内存，不持久化）');
+      showToast('凭证已保存', 'success');
+    } else {
+      alert('❌ 保存失败：' + (r.error || '未知错误'));
+      showToast('保存失败', 'error');
+    }
+    setButtonLoading($('btnSaveCreds'), false, '💾 保存');
+  });
 
   // 交易模式切换
   $('tradingMode')?.addEventListener('change', async () => {

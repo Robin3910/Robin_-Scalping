@@ -171,7 +171,7 @@
         "save_image": true,
         "style": "1",
         "symbol": "BINANCE:ETHUSDT",
-        "theme": "light",
+        "theme": "dark",
         "timezone": "Etc/UTC+8",
         "backgroundColor": "#ffffff",
         "gridColor": "rgba(46, 46, 46, 0.06)",
@@ -279,9 +279,10 @@
             </div>
           </fieldset>
           <fieldset>
-            <legend>交易方向</legend>
-            <label class="cfg-check"><input data-cfg="trade_buy" type="checkbox" /> 做多</label>
-            <label class="cfg-check"><input data-cfg="trade_sell" type="checkbox" /> 做空</label>
+            <legend>交易模式</legend>
+            <label class="cfg-check"><input data-cfg="paper_trading" type="checkbox" /> 模拟盘模式</label>
+            <label class="cfg-check"><input data-cfg="use_testnet_paper" type="checkbox" /> 模拟盘使用 Binance Testnet（真实下单到测试网）</label>
+            <div class="muted cfg-hint">启用后模拟盘将使用 Testnet API 真实下单，可在 Binance Testnet 查看订单和仓位历史</div>
           </fieldset>
           <fieldset>
             <legend>网格</legend>
@@ -445,6 +446,10 @@
       </label>
       <label>API Key<input id="apiKey" type="text" placeholder="切换真实盘时填写"></label>
       <label>API Secret<input id="apiSec" type="password" placeholder="切换真实盘时填写"></label>
+      <div class="cred-actions">
+        <button id="btnTestConn" class="btn btn-secondary btn-sm">🔌 测试连接</button>
+        <button id="btnSaveCreds" class="btn btn-primary btn-sm">💾 保存</button>
+      </div>
     </div>
   </div>
 </div>

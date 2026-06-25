@@ -102,6 +102,7 @@ class Config:
 
     # ---- 引擎 ----
     paper_trading: bool = True  # 默认模拟盘
+    use_testnet_paper: bool = False  # 模拟盘是否使用 Binance Testnet（真实下单但走测试网）
     log_buffer_size: int = 500
 
     # ---- Web ----

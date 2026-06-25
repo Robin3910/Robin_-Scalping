@@ -199,6 +199,67 @@ def api_credentials():
     return jsonify({"ok": False, "error": "key/secret 缺失"}), 400
 
 
+@app_flask.route("/api/test-credentials", methods=["POST"])
+@login_required
+def api_test_credentials():
+    """测试 Binance API 连接，返回账户余额和状态"""
+    data = request.get_json(force=True, silent=True) or {}
+    key = data.get("api_key", "")
+    sec = data.get("api_secret", "")
+    testnet = data.get("testnet", True)
+
+    if not key or not sec:
+        return jsonify({"ok": False, "error": "key/secret 缺失"}), 400
+
+    import requests as _req
+    import hmac, hashlib
+    from urllib.parse import urlencode
+    import time
+
+    base = "https://testnet.binancefuture.com" if testnet else "https://fapi.binance.com"
+
+    def sign(params):
+        qs = urlencode(params, doseq=True)
+        return hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+
+    try:
+        # 查询账户信息
+        ts = int(time.time() * 1000)
+        sig = sign({"timestamp": ts})
+        r = _req.get(f"{base}/fapi/v2/account",
+                     params={"timestamp": ts, "signature": sig},
+                     headers={"X-MBX-APIKEY": key},
+                     timeout=10)
+        if r.status_code == 200:
+            d = r.json()
+            total_balance = float(d.get("totalWalletBalance", 0))
+            asset = "USDT"
+            # assets = d.get("assets", [])
+            # if assets:
+            #     for a in assets:
+            #         if float(a.get("walletBalance", 0)) > 0 or float(a.get("crossWalletBalance", 0)) > 0:
+            #             asset = a.get("asset", "USDT")
+            #             break
+            return jsonify({
+                "ok": True,
+                "msg": "连接成功",
+                "account": {
+                    "totalBalance": total_balance,
+                    # "marginBalance": float(d.get("marginBalance", 0)),
+                    # "unrealizedPnL": float(d.get("totalUnrealizedProfit", 0)),
+                    "asset": asset,
+                }
+            })
+        elif r.status_code == 401:
+            return jsonify({"ok": False, "error": "API Key 或 Secret 错误（401 Unauthorized）"})
+        else:
+            return jsonify({"ok": False, "error": f"请求失败: {r.status_code} - {r.text[:100]}"})
+    except _req.exceptions.ConnectionError:
+        return jsonify({"ok": False, "error": f"无法连接到 Binance ({base})，请检查网络"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"测试失败: {str(e)}"})
+
+
 # ===== WebSocket =====
 @sock.route("/ws")
 def ws_conn(ws):

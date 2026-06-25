@@ -323,43 +323,35 @@ class StrategyEngine:
         # ① RSI 条件
         if cfg.enable_check_rsi:
             if is_buy:
-                preroll = self.state.buy.rsi_preroll_triggered
                 oversold_th = cfg.rsi_oversold
+                o, c = self._current_candle_for_signal()
                 if cur_rsi < oversold_th:
-                    self.state.buy.rsi_preroll_triggered = True
-                    cond("RSI", False,
-                         f"cur={cur_rsi:.1f} < oversold={oversold_th} → 等待K线收阳")
-                elif preroll:
-                    o, c = self._current_candle_for_signal()
                     if o is not None and c is not None:
                         bull_bar = c > o
                         cond("RSI", bull_bar,
-                             f"cur={cur_rsi:.1f} ≥ oversold={oversold_th}，pre_triggered=YES，"
+                             f"cur={cur_rsi:.1f} < oversold={oversold_th}，"
                              f"K线 {'阳' if bull_bar else '阴'}(open={o} close={c})")
                     else:
-                        cond("RSI", False, "cur≥oversold 但K线数据不足")
+                        cond("RSI", False,
+                             f"cur={cur_rsi:.1f} < oversold={oversold_th}，K线数据不足")
                 else:
-                    cond("RSI", False,
-                         f"cur={cur_rsi:.1f} ≥ oversold={oversold_th}，pre_triggered=NO")
+                    cond("RSI", True,
+                         f"cur={cur_rsi:.1f} ≥ oversold={oversold_th}")
             else:
-                preroll = self.state.sell.rsi_preroll_triggered
                 overbought_th = cfg.rsi_overbought
+                o, c = self._current_candle_for_signal()
                 if cur_rsi > overbought_th:
-                    self.state.sell.rsi_preroll_triggered = True
-                    cond("RSI", False,
-                         f"cur={cur_rsi:.1f} > overbought={overbought_th} → 等待K线收阴")
-                elif preroll:
-                    o, c = self._current_candle_for_signal()
                     if o is not None and c is not None:
                         bear_bar = c < o
                         cond("RSI", bear_bar,
-                             f"cur={cur_rsi:.1f} ≤ overbought={overbought_th}，pre_triggered=YES，"
+                             f"cur={cur_rsi:.1f} > overbought={overbought_th}，"
                              f"K线 {'阴' if bear_bar else '阳'}(open={o} close={c})")
                     else:
-                        cond("RSI", False, "cur≤overbought 但K线数据不足")
+                        cond("RSI", False,
+                             f"cur={cur_rsi:.1f} > overbought={overbought_th}，K线数据不足")
                 else:
-                    cond("RSI", False,
-                         f"cur={cur_rsi:.1f} ≤ overbought={overbought_th}，pre_triggered=NO")
+                    cond("RSI", True,
+                         f"cur={cur_rsi:.1f} ≤ overbought={overbought_th}")
         else:
             cond("RSI", True, "未启用")
 
@@ -615,10 +607,8 @@ class StrategyEngine:
     def _on_full_close(self, side: str) -> None:
         if side == "BUY":
             self.state.buy.reset()
-            self.state.buy.rsi_preroll_triggered = False
         else:
             self.state.sell.reset()
-            self.state.sell.rsi_preroll_triggered = False
         if self.cfg.enable_wait_after_close:
             self.state.last_close_time = time.time()
         self.log.trade(f"{side} 仓位全部平仓，状态已重置")

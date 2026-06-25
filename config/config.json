@@ -6,7 +6,7 @@
   "magic_number": 951221,
   "trade_buy": true,
   "trade_sell": true,
-  "enable_check_htf": true,
+  "enable_check_htf": false,
   "htf_timeframe": "15m",
   "trend_method": "price_vs_ma",
   "htf_sensitivity": 5,
@@ -19,7 +19,7 @@
   "htf_use_closed_bar": true,
   "enable_check_rsi": true,
   "rsi_period": 14,
-  "open_factor": 6,
+  "open_factor": 3,
   "grid_count": 5,
   "grid_spacing_pct": 0.15,
   "grid_lot_size": 1,
@@ -49,10 +49,11 @@
   "trailing_back_pct": 0.2,
   "comment_text": "Robin_ZhenDang",
   "paper_trading": true,
+  "use_testnet_paper": true,
   "log_buffer_size": 500,
   "password": "robin3910!",
-  "last_modified": 1782033431.118342,
+  "last_modified": 1782378165.1843154,
   "htf_ma_period1": 694,
-  "rsi_overbought": 53.3335,
-  "rsi_oversold": 46.6665
+  "rsi_overbought": 33.3334,
+  "rsi_oversold": 66.6666
 }

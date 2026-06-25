@@ -28,7 +28,6 @@ class SideState:
     level1_done: bool = False
     level2_done: bool = False
     breakeven_triggered: bool = False
-    rsi_preroll_triggered: bool = False
     grids: List[GridLeg] = field(default_factory=list)
 
     def reset(self) -> None:
@@ -39,7 +38,6 @@ class SideState:
         self.level1_done = False
         self.level2_done = False
         self.breakeven_triggered = False
-        self.rsi_preroll_triggered = False
         self.grids = []
 
 

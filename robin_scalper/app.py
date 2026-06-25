@@ -25,6 +25,9 @@ class App:
     def __init__(self):
         # 配置
         self.cfg: Config = load_config()
+        # Binance 凭证（仅内存，不持久化）
+        self._binance_key: str = os.environ.get("BINANCE_API_KEY", "")
+        self._binance_secret: str = os.environ.get("BINANCE_API_SECRET", "")
         # 总线 & 日志
         self.bus = EventBus()
         self.log = LogBuffer(size=self.cfg.log_buffer_size)
@@ -39,11 +42,8 @@ class App:
         # 行情
         self.feed = BinanceFeed(self.bus, self.agg, self.log,
                                 symbol=self.cfg.symbol, testnet=self.cfg.testnet)
-        # 经纪商（默认 Paper，可热切换）
-        self.broker: BrokerBase = PaperBroker(
-            symbol=self.cfg.symbol, bus=self.bus, log=self.log,
-            leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
-        )
+        # 经纪商（根据配置初始化）
+        self.broker: BrokerBase = self._create_broker()
         # 策略引擎
         self.engine = StrategyEngine(self.cfg, self.agg, self.broker,
                                      self.state, self.log, self.bus)
@@ -52,13 +52,54 @@ class App:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._tick_ts = 0.0
 
+    def _create_broker(self) -> BrokerBase:
+        """根据当前配置创建合适的 broker"""
+        if self.cfg.paper_trading and self.cfg.use_testnet_paper:
+            # Testnet 模拟盘：用 BinanceBroker 真实下单到测试网
+            if not self._binance_key or not self._binance_secret:
+                self.log.warn("Testnet 模拟盘需要 Binance API 凭证，请先在面板中设置")
+                # 回退到内存模拟盘
+                return PaperBroker(
+                    symbol=self.cfg.symbol, bus=self.bus, log=self.log,
+                    leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
+                )
+            return BinanceBroker(
+                symbol=self.cfg.symbol,
+                api_key=self._binance_key,
+                api_secret=self._binance_secret,
+                bus=self.bus, log=self.log,
+                testnet=True,
+                leverage=self.cfg.leverage,
+                margin_mode=self.cfg.margin_mode,
+            )
+        elif self.cfg.paper_trading:
+            return PaperBroker(
+                symbol=self.cfg.symbol, bus=self.bus, log=self.log,
+                leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
+            )
+        else:
+            # 真实盘（可能用 testnet 或主网）
+            if not self._binance_key or not self._binance_secret:
+                self.log.warn("真实交易需要 Binance API 凭证")
+            return BinanceBroker(
+                symbol=self.cfg.symbol,
+                api_key=self._binance_key,
+                api_secret=self._binance_secret,
+                bus=self.bus, log=self.log,
+                testnet=self.cfg.testnet,
+                leverage=self.cfg.leverage,
+                margin_mode=self.cfg.margin_mode,
+            )
+
     # ====== 配置切换 ======
     def update_config(self, new_cfg: Config, persist: bool = True) -> None:
         old_symbol = self.cfg.symbol
+        old_paper = self.cfg.paper_trading
+        old_use_testnet_paper = getattr(self.cfg, 'use_testnet_paper', False)
         self.cfg = new_cfg
         if persist:
             save_config(self.cfg)
-        self.log.info(f"配置已更新：symbol={self.cfg.symbol} paper={self.cfg.paper_trading}")
+        self.log.info(f"配置已更新：symbol={self.cfg.symbol} paper={self.cfg.paper_trading} testnet_paper={getattr(self.cfg, 'use_testnet_paper', False)}")
 
         # 如果 symbol 变了，不管运行与否都要重建 feed
         if old_symbol != self.cfg.symbol:
@@ -66,24 +107,14 @@ class App:
             self.agg.clear_all()
             self.log.info(f"Symbol 变更：{old_symbol} → {self.cfg.symbol}，数据已清空")
 
-        # 如果运行时还有额外操作
-        if self._running:
+        # 如果运行中且交易模式有变化，重建 broker
+        paper_changed = (old_paper != self.cfg.paper_trading or
+                         old_use_testnet_paper != getattr(self.cfg, 'use_testnet_paper', False))
+        if self._running and paper_changed:
             self.feed.stop()
-            # 等待旧线程真正退出
             for t in self.feed._threads:
                 t.join(timeout=5)
-            # 重建 broker（模拟盘/真实盘）
-            if self.cfg.paper_trading:
-                self.broker = PaperBroker(
-                    symbol=self.cfg.symbol, bus=self.bus, log=self.log,
-                    leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
-                )
-            else:
-                self.broker = BinanceBroker(
-                    symbol=self.cfg.symbol, api_key="", api_secret="",
-                    bus=self.bus, log=self.log, testnet=self.cfg.testnet,
-                    leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
-                )
+            self.broker = self._create_broker()
             self.engine.broker = self.broker
             # 清空旧数据并重新加载历史 K 线
             self.agg.clear_all()
@@ -94,6 +125,9 @@ class App:
                 log_fn=self.log.info,
             )
             self.feed.start()
+        elif self._running:
+            # 仅其他参数变更，不重建 broker，但可能需要重载数据
+            pass
 
     def _rebuild_feed(self) -> None:
         """重建 feed，不管运行与否"""
@@ -110,6 +144,10 @@ class App:
         if self._running:
             self.log.warn("请先停止策略再切换交易模式")
             return
+        self._binance_key = api_key
+        self._binance_secret = api_secret
+        os.environ["BINANCE_API_KEY"] = api_key
+        os.environ["BINANCE_API_SECRET"] = api_secret
         self.broker = BinanceBroker(
             symbol=self.cfg.symbol, api_key=api_key, api_secret=api_secret,
             bus=self.bus, log=self.log, testnet=self.cfg.testnet,
@@ -124,14 +162,27 @@ class App:
         if self._running:
             self.log.warn("请先停止策略再切换交易模式")
             return
-        self.broker = PaperBroker(
-            symbol=self.cfg.symbol, bus=self.bus, log=self.log,
-            leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
-        )
+        if self.cfg.use_testnet_paper and self._binance_key and self._binance_secret:
+            # Testnet 模拟盘：用 BinanceBroker 下单到测试网
+            self.broker = BinanceBroker(
+                symbol=self.cfg.symbol,
+                api_key=self._binance_key,
+                api_secret=self._binance_secret,
+                bus=self.bus, log=self.log,
+                testnet=True,
+                leverage=self.cfg.leverage,
+                margin_mode=self.cfg.margin_mode,
+            )
+            self.log.info("已切换到 Testnet 模拟盘（真实下单到测试网）")
+        else:
+            self.broker = PaperBroker(
+                symbol=self.cfg.symbol, bus=self.bus, log=self.log,
+                leverage=self.cfg.leverage, margin_mode=self.cfg.margin_mode,
+            )
+            self.log.info("已切换到内存模拟盘")
         self.engine.broker = self.broker
         self.state.paper_trading = True
         self.cfg.paper_trading = True
-        self.log.info("已切换到模拟盘")
 
     # ====== 启动 / 停止 ======
     async def start(self) -> None:
