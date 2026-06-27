@@ -92,6 +92,7 @@ def main():
         app_flask.run(host=host, port=port, debug=False, threaded=True)
     finally:
         loop.call_soon_threadsafe(loop.stop)
+        app.log.close()
 
 
 if __name__ == "__main__":

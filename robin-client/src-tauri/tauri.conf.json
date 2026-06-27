@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schemas.tauri.app/config/2",
+  "productName": "Robin Scalper",
+  "version": "1.0.0",
+  "identifier": "com.robin.scalper",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devtools": true
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Robin Scalper - Grid Trading",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "minWidth": 1200,
+        "minHeight": 700,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.binance.com wss://*.binance.com https://testnet.binancefuture.com wss://stream.binancefuture.com; img-src 'self' data: https:;"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": null,
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {}
+}

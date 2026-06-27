@@ -1,0 +1,35 @@
+﻿{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: main.py (调试)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/robin_scalper/main.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Python: 当前文件 (调试)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: 附加到进程",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            }
+        }
+    ]
+}

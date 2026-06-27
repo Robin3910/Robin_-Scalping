@@ -238,6 +238,7 @@ class App:
         self.feed.stop()
         self._rebuild_feed()
         self.log.info("策略已停止")
+        self.log.close()
 
     # ====== 手动控制 ======
     async def manual_close_all(self) -> None:

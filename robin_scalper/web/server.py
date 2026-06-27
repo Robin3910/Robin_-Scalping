@@ -195,6 +195,14 @@ def api_credentials():
     if key and sec:
         os.environ["BINANCE_API_KEY"] = key
         os.environ["BINANCE_API_SECRET"] = sec
+        # 关键：同步更新 app 实例变量，否则 broker 不会使用新凭证！
+        app._binance_key = key
+        app._binance_secret = sec
+        # 如果策略正在运行，需要重建 broker
+        if app._running:
+            app.log.info("凭证已更新，正在重建 broker...")
+            app.broker = app._create_broker()
+            app.engine.broker = app.broker
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "key/secret 缺失"}), 400
 
